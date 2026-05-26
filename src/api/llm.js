@@ -67,6 +67,21 @@ const LANG_INFO = {
     cultureHint: 'Use everyday Hindi written in Devanagari script — natural conversational Hindi as spoken in India. E.g. "क्या कर रहे हो?", "चलो", "हाँ बिलकुल" etc. Not overly Sanskritized — real spoken Hindi.',
     voiceLang: 'hi-IN',
   },
+  de: {
+    name: 'German',
+    cultureHint: 'Use natural everyday German — casual, conversational, not overly formal. Use "du" form by default. Common contractions like "hab ich", "wollt ich", local expressions.',
+    voiceLang: 'de-DE',
+  },
+  ja: {
+    name: 'Japanese (Romaji)',
+    cultureHint: 'Use everyday Japanese written in Romaji (English alphabet) — the way learners practice. E.g. "konnichiwa", "ogenki desu ka?", "iidesu yo", "sou desu ne". Use casual form (ta-gen) unless formal is appropriate. Sound like a real Japanese person chatting, not a textbook.',
+    voiceLang: 'ja-JP',
+  },
+  zhp: {
+    name: 'Mandarin Chinese (Pinyin)',
+    cultureHint: 'Use everyday Mandarin Chinese written in Pinyin (English alphabet with tone marks) — the way learners practice. E.g. "nǐ hǎo", "wǒ è le", "zhēn de ma?", "hǎo ba". Sound like a real Chinese person chatting casually, not a textbook.',
+    voiceLang: 'zh-CN',
+  },
 };
 
 export function getVoiceLang(langKey) {
@@ -221,16 +236,33 @@ Output ONLY the translated lines, one per line. No labels, no numbers, no explan
   return await callLLM(system, user);
 }
 
-export async function startConversation(difficulty, topic, targetLang) {
+export async function startConversation(difficulty, topic, targetLang, userGender, targetGender, personality) {
   const tgt = LANG_INFO[targetLang];
+  const personalityHint = {
+    friendly: 'warm, casual, and approachable',
+    professional: 'polite, professional, but still conversational',
+    funny: 'humorous, playful, uses jokes and light teasing',
+    patient: 'very patient, speaks slowly and clearly, gives gentle encouragement',
+    encouraging: 'enthusiastic, gives lots of positive feedback and praise',
+    therapist: 'a caring therapist — asks thoughtful questions, listens actively, reflects back what was said, offers gentle insights, creates a safe supportive space',
+  }[personality] || 'warm and friendly';
 
-  const system = `You are a friendly native ${tgt.name} speaker having a casual conversation with a language learner.
+  const genderHint = targetGender === 'woman'
+    ? `You are a woman. Use feminine speech patterns naturally.`
+    : `You are a man. Use masculine speech patterns naturally.`;
+  const learnerHint = userGender === 'woman'
+    ? `The learner is a woman.`
+    : `The learner is a man.`;
+
+  const system = `You are a ${personalityHint} native ${tgt.name} ${targetGender} having a casual conversation with a language learner.
+${genderHint}
+${learnerHint}
 
 RULES:
 - Always respond ONLY in ${tgt.name}, never English
 - Keep responses short and natural — 1-2 sentences max
-- Be warm and friendly
 - ${tgt.cultureHint}
+- Be ${personalityHint}
 
 FORMAT: Always respond in exactly this format:
 [corrected] ... [/corrected] [reply] ... [/reply]
@@ -250,16 +282,33 @@ Example when learner is correct saying "tengo hambre":
   return text.trim();
 }
 
-export async function continueConversation(messages, targetLang, difficulty, topic) {
+export async function continueConversation(messages, targetLang, difficulty, topic, userGender, targetGender, personality) {
   const tgt = LANG_INFO[targetLang];
+  const personalityHint = {
+    friendly: 'warm, casual, and approachable',
+    professional: 'polite, professional, but still conversational',
+    funny: 'humorous, playful, uses jokes and light teasing',
+    patient: 'very patient, speaks slowly and clearly, gives gentle encouragement',
+    encouraging: 'enthusiastic, gives lots of positive feedback and praise',
+    therapist: 'a caring therapist — asks thoughtful questions, listens actively, reflects back what was said, offers gentle insights, creates a safe supportive space',
+  }[personality] || 'warm and friendly';
 
-  const system = `You are a friendly native ${tgt.name} speaker having a casual conversation with a language learner.
+  const genderHint = targetGender === 'woman'
+    ? `You are a woman. Use feminine speech patterns naturally.`
+    : `You are a man. Use masculine speech patterns naturally.`;
+  const learnerHint = userGender === 'woman'
+    ? `The learner is a woman.`
+    : `The learner is a man.`;
+
+  const system = `You are a ${personalityHint} native ${tgt.name} ${targetGender} having a casual conversation with a language learner.
+${genderHint}
+${learnerHint}
 
 RULES:
 - Always respond ONLY in ${tgt.name}, never English
 - Keep responses short and natural — 1-2 sentences max
-- Be warm and friendly
 - ${tgt.cultureHint}
+- Be ${personalityHint}
 
 FORMAT: Always respond in exactly this format:
 [corrected] ... [/corrected] [reply] ... [/reply]

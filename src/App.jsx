@@ -9,10 +9,25 @@ const MODELS = [
 ];
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
 const TOPICS = ['greetings', 'food', 'daily', 'travel', 'work'];
+const GENDERS = [
+  { key: 'man', label: 'Man' },
+  { key: 'woman', label: 'Woman' },
+];
+const PERSONALITIES = [
+  { key: 'friendly', label: 'Friendly' },
+  { key: 'professional', label: 'Professional' },
+  { key: 'funny', label: 'Funny' },
+  { key: 'patient', label: 'Patient' },
+  { key: 'encouraging', label: 'Encouraging' },
+  { key: 'therapist', label: 'Therapist' },
+];
 const LANGUAGES = [
   { key: 'es', label: 'Spanish' },
+  { key: 'de', label: 'German' },
   { key: 'hi', label: 'Hindi (Hinglish)' },
   { key: 'hin', label: 'Hindi (Devanagari)' },
+  { key: 'ja', label: 'Japanese (Romaji)' },
+  { key: 'zhp', label: 'Mandarin (Pinyin)' },
   { key: 'en', label: 'English' },
 ];
 const MODES = [
@@ -143,17 +158,21 @@ function App() {
   const [selectedModel, setSelectedModel] = usePersistedState('ll-model', MODELS[0].id);
   const [ttsSettings, setTtsSettings] = useState(getTTSSettings);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [userGender, setUserGender] = usePersistedState('ll-userGender', 'man');
+  const [targetGender, setTargetGender] = usePersistedState('ll-targetGender', 'woman');
+  const [personality, setPersonality] = usePersistedState('ll-personality', 'friendly');
+  const [customTopic, setCustomTopic] = usePersistedState('ll-customTopic', '');
   const [passage, setPassage] = useState(null);
   const [passageText, setPassageText] = useState('');
   const [userInput, setUserInput] = useState('');
   const [result, setResult] = useState(null);
   const [answer, setAnswer] = useState(null);
   const [showAnswer, setShowAnswer] = useState(false);
+  const [autoAnswer, setAutoAnswer] = usePersistedState('ll-autoAnswer', false);
   const [loading, setLoading] = useState(null);
   const [error, setError] = useState(null);
   const [historyCount, setHistoryCount] = useState(0);
   const [started, setStarted] = useState(false);
-  const [activeTab, setActiveTab] = useState('response');
 
   // Conversation mode state
   const [chatMessages, setChatMessages] = useState([]);
@@ -165,6 +184,21 @@ function App() {
   const [passageSpeaking, setPassageSpeaking] = useState(false);
 
   const chatEndRef = useRef(null);
+
+  const resetSession = useCallback(() => {
+    setStarted(false);
+    setPassage(null);
+    setPassageText('');
+    setUserInput('');
+    setResult(null);
+    setAnswer(null);
+    setShowAnswer(false);
+    setChatMessages([]);
+    setChatInput('');
+    setTranslations({});
+    setSpeakingIdx(null);
+    setPassageSpeaking(false);
+  }, []);
 
   const currentModel = MODELS.find((m) => m.id === selectedModel);
   const voiceSupported = currentModel?.voice && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -197,6 +231,7 @@ function App() {
   }, []);
 
   const voiceLang = getVoiceLang(mode === 'converse' ? targetLang : targetLang);
+  const effectiveTopic = customTopic.trim() || topic;
   const { listening, startListening, stopListening, audioURL, playing, playAudio, stopAudio, clearAudio } = useVoiceInput(voiceLang, handleUserInput);
 
   const handleGenerate = useCallback(async () => {
@@ -204,13 +239,18 @@ function App() {
     setError(null);
     setUserInput(''); setResult(null); setAnswer(null); setShowAnswer(false);
     try {
-      const lines = await generatePassage(difficulty, topic, lineCount, sourceLang, targetLang);
+      const lines = await generatePassage(difficulty, effectiveTopic, lineCount, sourceLang, targetLang);
       setPassage(lines);
       setPassageText(lines.join('\n'));
+      if (autoAnswer) {
+        const ans = await getCorrectTranslation(lines.join('\n'), sourceLang, targetLang);
+        setAnswer(ans);
+        setShowAnswer(true);
+      }
       if (!started) setStarted(true);
     } catch (e) { setError(e.message); }
     finally { setLoading(null); }
-  }, [difficulty, topic, lineCount, sourceLang, targetLang, started]);
+  }, [difficulty, effectiveTopic, lineCount, sourceLang, targetLang, autoAnswer, started]);
 
   const handleEvaluate = useCallback(async () => {
     if (!passage) return;
@@ -259,22 +299,27 @@ function App() {
   const parseConvoResponse = (text) => {
     const correctedMatch = text.match(/\[corrected\]\s*([\s\S]*?)\s*\[\/corrected\]/);
     const replyMatch = text.match(/\[reply\]\s*([\s\S]*?)\s*\[\/reply\]/);
+    let reply = replyMatch ? replyMatch[1].trim() : '';
+    if (!reply) {
+      reply = text.replace(/\[corrected\][\s\S]*?\[\/corrected\]/g, '').trim();
+    }
+    reply = reply.replace(/\[\/?corrected\]/g, '').replace(/\[\/?reply\]/g, '').trim();
     return {
       corrected: correctedMatch ? correctedMatch[1].trim() : '',
-      reply: replyMatch ? replyMatch[1].trim() : text.trim(),
+      reply,
     };
   };
 
   const handleStartConvo = useCallback(async () => {
     setLoading('convo'); setError(null); setChatMessages([]); setTranslations({});
     try {
-      const text = await startConversation(difficulty, topic, targetLang);
+      const text = await startConversation(difficulty, effectiveTopic, targetLang, userGender, targetGender, personality);
       const parsed = parseConvoResponse(text);
       setChatMessages([{ role: 'assistant', content: parsed.reply || text }]);
       if (!started) setStarted(true);
     } catch (e) { setError(e.message); }
     finally { setLoading(null); }
-  }, [difficulty, topic, targetLang, started]);
+  }, [difficulty, effectiveTopic, targetLang, userGender, targetGender, personality, started]);
 
   const handleSendChat = useCallback(async () => {
     if (!chatInput.trim()) return;
@@ -284,14 +329,14 @@ function App() {
     setChatInput('');
     setLoading('convo'); setError(null);
     try {
-      const text = await continueConversation(newMessages, targetLang, difficulty, topic);
+      const text = await continueConversation(newMessages, targetLang, difficulty, effectiveTopic, userGender, targetGender, personality);
       const parsed = parseConvoResponse(text);
       const assistantMsg = { role: 'assistant', content: parsed.reply || text };
       const correctedUserMsg = { ...userMsg, corrected: parsed.corrected };
       setChatMessages([...chatMessages, correctedUserMsg, assistantMsg]);
     } catch (e) { setError(e.message); }
     finally { setLoading(null); }
-  }, [chatInput, chatMessages, targetLang, difficulty, topic]);
+  }, [chatInput, chatMessages, targetLang, difficulty, effectiveTopic, userGender, targetGender, personality]);
 
   const handleTranslate = useCallback(async (text, msgIndex) => {
     if (translations[msgIndex]) { setTranslations((t) => { const n = {...t}; delete n[msgIndex]; return n; }); return; }
@@ -336,7 +381,7 @@ function App() {
   const tgtLabel = LANGUAGES.find((l) => l.key === targetLang).label;
 
   return (
-    <div className="app">
+    <div className={`app${mode === 'converse' && started ? ' convo-layout' : ''}`}>
       <div className="app-header">
         <button className="settings-toggle" onClick={() => setSidebarOpen(true)} title="Settings">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
@@ -388,86 +433,84 @@ function App() {
                   </div>
                 )}
               </div>
-              <button className="next-btn" onClick={handleGenerate} disabled={loading === 'generate'}>
-                {loading === 'generate' ? 'Generating...' : '\u2192 Next'}
-              </button>
+              <div className="next-row">
+                {mode === 'translate' && (
+                  <button className={`auto-answer-btn ${autoAnswer ? 'active' : ''}`} onClick={() => setAutoAnswer(!autoAnswer)} title="Auto-show answer with each passage">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    Auto
+                  </button>
+                )}
+                <button className="next-btn" onClick={handleGenerate} disabled={loading === 'generate'}>
+                  {loading === 'generate' ? 'Generating...' : '\u2192 Next'}
+                </button>
+              </div>
               {passage && (
                 <>
                   <div className="tab-card">
-                    <div className="tab-header">
-                      <button className={`tab-btn ${activeTab === 'response' ? 'active' : ''}`} onClick={() => setActiveTab('response')}>Your Response</button>
-                      <button className={`tab-btn ${activeTab === 'answer' ? 'active' : ''}`} onClick={() => setActiveTab('answer')}>Answer</button>
-                    </div>
                     <div className="tab-body">
-                      {activeTab === 'response' && (
-                        <div className="tab-content">
-                          <div className={`textarea-wrapper ${listening ? 'recording' : ''}`}>
-                            <textarea value={userInput} onChange={(e) => handleUserInput(e.target.value)} placeholder={listening ? 'Listening... speak now' : `Type or speak your ${tgtLabel} translation here...`} rows={5} />
-                            {listening && <div className="recording-bar"><span className="recording-dot" /> Recording...</div>}
-                          </div>
-                          <div className="action-btns">
-                            <button className="eval-btn" onClick={handleEvaluate} disabled={!userInput.trim() || loading === 'evaluate'}>
-                              {loading === 'evaluate' ? 'Evaluating...' : 'Evaluate'}
-                            </button>
-                            {voiceSupported && (
-                              <>
-                                <button className={`voice-btn ${listening ? 'voice-active' : ''}`} onClick={handleVoiceToggle}>
-                                  {listening ? '\u25cf Stop Recording' : '\uD83C\uDF99 Start Recording'}
-                                </button>
-                                {audioURL && !listening && (
-                                  <div className="playback-controls">
-                                    <button className="playback-btn" onClick={playing ? stopAudio : playAudio}>{playing ? '\u25a0 Stop' : '\u25b6 Hear Yourself'}</button>
-                                    <button className="playback-clear-btn" onClick={clearAudio} title="Discard recording">\u2715</button>
-                                  </div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                          {result && (
-                            <div className="result-box">
-                              <div className="score-row">
-                                <div className="score-circle" data-level={result.score >= 75 ? 'high' : result.score >= 40 ? 'mid' : 'low'}>
-                                  <span className="score-num">{result.score}</span>
-                                  <span className="score-pct">/100</span>
-                                </div>
-                                <p className="feedback">{result.feedback}</p>
-                              </div>
-                              {result.correctedLines && result.correctedLines.length > 0 && passage && (
-                                <div className="corrections">
-                                  {result.correctedLines.map((line, i) => (
-                                    <div key={i} className="correction-group">
-                                      <div className="correction-en">{passage[i]}</div>
-                                      <div className="correction-yours">{renderCorrectedLine(line)}</div>
-                                      {line.original !== line.corrected && <div className="correction-answer">{line.corrected}</div>}
+                      <div className="tab-content">
+                        {!autoAnswer && (
+                          <>
+                            <div className={`textarea-wrapper ${listening ? 'recording' : ''}`}>
+                              <textarea value={userInput} onChange={(e) => handleUserInput(e.target.value)} placeholder={listening ? 'Listening... speak now' : `Type or speak your ${tgtLabel} translation here...`} rows={5} />
+                              {listening && <div className="recording-bar"><span className="recording-dot" /> Recording...</div>}
+                            </div>
+                            <div className="action-btns">
+                              <button className="eval-btn" onClick={handleEvaluate} disabled={!userInput.trim() || loading === 'evaluate'}>
+                                {loading === 'evaluate' ? 'Evaluating...' : 'Evaluate'}
+                              </button>
+                              <button className="answer-btn" onClick={handleShowAnswer} disabled={loading === 'answer' || loading === 'evaluate'}>
+                                {showAnswer ? 'Hide Answer' : answer ? 'Show Answer' : loading === 'answer' ? 'Loading...' : 'Show Answer'}
+                              </button>
+                              {voiceSupported && (
+                                <>
+                                  <button className={`voice-btn ${listening ? 'voice-active' : ''}`} onClick={handleVoiceToggle}>
+                                    {listening ? '\u25cf Stop Recording' : '\uD83C\uDF99 Start Recording'}
+                                  </button>
+                                  {audioURL && !listening && (
+                                    <div className="playback-controls">
+                                      <button className="playback-btn" onClick={playing ? stopAudio : playAudio}>{playing ? '\u25a0 Stop' : '\u25b6 Hear Yourself'}</button>
+                                      <button className="playback-clear-btn" onClick={clearAudio} title="Discard recording">✕</button>
                                     </div>
-                                  ))}
-                                </div>
+                                  )}
+                                </>
                               )}
                             </div>
-                          )}
-                        </div>
-                      )}
-                      {activeTab === 'answer' && (
-                        <div className="tab-content">
-                          {loading === 'answer' || loading === 'evaluate' ? (
-                            <div className="passage-loading">Loading answer...</div>
-                          ) : answer ? (
-                            <>
-                              {passage && passage.map((enLine, i) => (
-                                <div key={i} className="answer-pair">
-                                  <div className="answer-en">{enLine}</div>
-                                  <div className="answer-translation">{answer.split('\n').filter(Boolean)[i] || ''}</div>
+                            {result && (
+                              <div className="result-box">
+                                <div className="score-row">
+                                  <div className="score-circle" data-level={result.score >= 75 ? 'high' : result.score >= 40 ? 'mid' : 'low'}>
+                                    <span className="score-num">{result.score}</span>
+                                    <span className="score-pct">/100</span>
+                                  </div>
+                                  <p className="feedback">{result.feedback}</p>
                                 </div>
-                              ))}
-                            </>
-                          ) : (
-                            <div className="answer-prompt">
-                              <p>See the native {tgtLabel} translation</p>
-                              <button className="answer-load-btn" onClick={handleShowAnswer} disabled={loading === 'answer'}>Show Answer</button>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                                {result.correctedLines && result.correctedLines.length > 0 && passage && (
+                                  <div className="corrections">
+                                    {result.correctedLines.map((line, i) => (
+                                      <div key={i} className="correction-group">
+                                        <div className="correction-en">{passage[i]}</div>
+                                        <div className="correction-yours">{renderCorrectedLine(line)}</div>
+                                        {line.original !== line.corrected && <div className="correction-answer">{line.corrected}</div>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {showAnswer && answer && passage && (
+                          <div className="result-box">
+                            {passage.map((enLine, i) => (
+                              <div key={i} className="answer-pair">
+                                <div className="answer-en">{enLine}</div>
+                                <div className="answer-translation">{answer.split('\n').filter(Boolean)[i] || ''}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </>
@@ -477,10 +520,10 @@ function App() {
 
           {started && mode === 'converse' && (
             <div className="convo-area">
-              {chatMessages.length === 0 && (
-                <div className="convo-empty">Start the conversation above</div>
-              )}
               <div className="convo-messages">
+                {chatMessages.length === 0 && (
+                  <div className="convo-empty">Start the conversation below</div>
+                )}
                 {chatMessages.map((msg, i) => (
                   <div key={i} className={`convo-msg ${msg.role}`}>
                     <div className="convo-bubble">{msg.content}</div>
@@ -514,7 +557,7 @@ function App() {
                     rows={2}
                   />
                   <div className="convo-input-actions">
-                    <button className="icon-btn suggest-icon-btn" onClick={handleSuggest} disabled={suggesting || chatMessages.length === 0} title="Suggest a response">
+                    <button className={`icon-btn suggest-icon-btn${suggesting ? ' suggesting' : ''}`} onClick={handleSuggest} disabled={suggesting || chatMessages.length === 0} title={suggesting ? 'Getting suggestion...' : 'Suggest a response'}>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>
                     </button>
                     <button className="icon-btn send-icon-btn" onClick={handleSendChat} disabled={!chatInput.trim() || loading === 'convo'} title="Send">
@@ -539,7 +582,7 @@ function App() {
               <label>Mode</label>
               <div className="btn-group">
                 {MODES.map((m) => (
-                  <button key={m.key} className={mode === m.key ? 'active' : ''} onClick={() => { setMode(m.key); setStarted(false); }}>{m.label}</button>
+                  <button key={m.key} className={mode === m.key ? 'active' : ''} onClick={() => { setMode(m.key); resetSession(); }}>{m.label}</button>
                 ))}
               </div>
             </div>
@@ -555,7 +598,7 @@ function App() {
               <label>Difficulty</label>
               <div className="btn-group">
                 {DIFFICULTIES.map((d) => (
-                  <button key={d} className={difficulty === d ? 'active' : ''} onClick={() => setDifficulty(d)}>{d}</button>
+                  <button key={d} className={difficulty === d ? 'active' : ''} onClick={() => { setDifficulty(d); resetSession(); }}>{d}</button>
                 ))}
               </div>
             </div>
@@ -563,7 +606,34 @@ function App() {
               <label>Topic</label>
               <div className="btn-group">
                 {TOPICS.map((t) => (
-                  <button key={t} className={topic === t ? 'active' : ''} onClick={() => setTopic(t)}>{t}</button>
+                  <button key={t} className={topic === t && !customTopic.trim() ? 'active' : ''} onClick={() => { setTopic(t); setCustomTopic(''); resetSession(); }}>{t}</button>
+                ))}
+              </div>
+              {import.meta.env.DEV && (
+                <input className="model-input topic-input" type="text" placeholder="Or type a custom topic..." value={customTopic} onChange={(e) => { setCustomTopic(e.target.value); resetSession(); }} />
+              )}
+            </div>
+            <div className="setting-group">
+              <label>You are</label>
+              <div className="btn-group">
+                {GENDERS.map((g) => (
+                  <button key={g.key} className={userGender === g.key ? 'active' : ''} onClick={() => { setUserGender(g.key); resetSession(); }}>{g.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="setting-group">
+              <label>Chat partner is</label>
+              <div className="btn-group">
+                {GENDERS.map((g) => (
+                  <button key={g.key} className={targetGender === g.key ? 'active' : ''} onClick={() => { setTargetGender(g.key); resetSession(); }}>{g.label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="setting-group">
+              <label>Partner personality</label>
+              <div className="btn-group">
+                {PERSONALITIES.map((p) => (
+                  <button key={p.key} className={personality === p.key ? 'active' : ''} onClick={() => { setPersonality(p.key); resetSession(); }}>{p.label}</button>
                 ))}
               </div>
             </div>
@@ -571,7 +641,7 @@ function App() {
               <label>I speak (source)</label>
               <div className="btn-group">
                 {LANGUAGES.map((l) => (
-                  <button key={l.key} className={sourceLang === l.key ? 'active' : ''} onClick={() => setSourceLang(l.key)}>{l.label}</button>
+                  <button key={l.key} className={sourceLang === l.key ? 'active' : ''} onClick={() => { setSourceLang(l.key); resetSession(); }}>{l.label}</button>
                 ))}
               </div>
             </div>
@@ -579,7 +649,7 @@ function App() {
               <label>I'm learning (target)</label>
               <div className="btn-group">
                 {LANGUAGES.filter((l) => l.key !== sourceLang).map((l) => (
-                  <button key={l.key} className={targetLang === l.key ? 'active' : ''} onClick={() => setTargetLang(l.key)}>{l.label}</button>
+                  <button key={l.key} className={targetLang === l.key ? 'active' : ''} onClick={() => { setTargetLang(l.key); resetSession(); }}>{l.label}</button>
                 ))}
               </div>
             </div>
