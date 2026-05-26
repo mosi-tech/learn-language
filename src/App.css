@@ -1107,6 +1107,11 @@ textarea::placeholder {
   flex-shrink: 0;
 }
 
+.convo-input-actions .icon-btn {
+  min-width: 36px;
+  min-height: 36px;
+}
+
 .icon-btn {
   background: transparent;
   border: none;

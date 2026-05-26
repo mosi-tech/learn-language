@@ -1,11 +1,34 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { generatePassage, evaluateTranslation, getCorrectTranslation, setModel as setLLMModel, clearHistory, startConversation, continueConversation, translateToSource, suggestResponse } from './api/llm';
+import { generatePassage, generatePassageStream, evaluateTranslation, getCorrectTranslation, setModel as setLLMModel, clearHistory, addConversationEntry, startConversation, continueConversation, continueConversationStream, translateToSource, suggestResponse } from './api/llm';
 import { speakWithLang, getVoiceLang, getTTSSettings, saveTTSSettings } from './api/tts';
 import './App.css';
 
+function renderSimpleMarkdown(text) {
+  if (!text) return text;
+  const parts = [];
+  const regex = /(\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*.+?\*)|([^*]+)/g;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    const s = match[0];
+    if (s.startsWith('***') && s.endsWith('***')) {
+      parts.push(<strong key={key++}><em>{s.slice(3, -3)}</em></strong>);
+    } else if (s.startsWith('**') && s.endsWith('**')) {
+      parts.push(<strong key={key++}>{s.slice(2, -2)}</strong>);
+    } else if (s.startsWith('*') && s.endsWith('*')) {
+      parts.push(<em key={key++}>{s.slice(1, -1)}</em>);
+    } else {
+      parts.push(s);
+    }
+  }
+  return parts.length > 0 ? parts : text;
+}
+
 const MODELS = [
+  { id: 'ministral-3:3b-cloud', label: 'Ministral 3 (Fast)', voice: false },
+  { id: 'deepseek-v4-flash:cloud', label: 'DeepSeek V4 Flash', voice: false },
+  { id: 'minimax-m2.7:cloud', label: 'MiniMax M2.7', voice: false },
   { id: 'gemini-3-flash-preview:cloud', label: 'Gemini 3 Flash', voice: false },
-  { id: 'gemma4:31b-cloud', label: 'Gemma 4', voice: true },
 ];
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
 const TOPICS = ['greetings', 'food', 'daily', 'travel', 'work'];
@@ -238,16 +261,36 @@ function App() {
     setLoading('generate');
     setError(null);
     setUserInput(''); setResult(null); setAnswer(null); setShowAnswer(false);
+    setPassage(['Generating...']);
+    setPassageText('');
+    if (!started) setStarted(true);
     try {
-      const lines = await generatePassage(difficulty, effectiveTopic, lineCount, sourceLang, targetLang);
+      const stream = generatePassageStream(difficulty, effectiveTopic, lineCount, sourceLang, targetLang);
+      let rawText = '';
+      let firstChunk = true;
+
+      for await (const chunk of stream) {
+        rawText += chunk;
+        const lines = rawText.split('\n').map((l) => l.replace(/^\d+[\.\)]\s*/, '').trim()).filter(Boolean).slice(0, lineCount);
+        setPassage(lines);
+        setPassageText(lines.join('\n'));
+        firstChunk = false;
+      }
+
+      const lines = rawText.split('\n').map((l) => l.replace(/^\d+[\.\)]\s*/, '').trim()).filter(Boolean).slice(0, lineCount);
+      if (lines.length === 0) lines.push('No passage generated. Try again.');
+      const finalText = lines.join('\n');
       setPassage(lines);
-      setPassageText(lines.join('\n'));
+      setPassageText(finalText);
+      addConversationEntry(effectiveTopic, finalText);
+
       if (autoAnswer) {
-        const ans = await getCorrectTranslation(lines.join('\n'), sourceLang, targetLang);
+        setLoading('answer');
+        const ans = await getCorrectTranslation(finalText, sourceLang, targetLang);
+        setPassage(lines);
         setAnswer(ans);
         setShowAnswer(true);
       }
-      if (!started) setStarted(true);
     } catch (e) { setError(e.message); }
     finally { setLoading(null); }
   }, [difficulty, effectiveTopic, lineCount, sourceLang, targetLang, autoAnswer, started]);
@@ -322,18 +365,44 @@ function App() {
   }, [difficulty, effectiveTopic, targetLang, userGender, targetGender, personality, started]);
 
   const handleSendChat = useCallback(async () => {
-    if (!chatInput.trim()) return;
-    const userMsg = { role: 'user', content: chatInput.trim() };
-    const newMessages = [...chatMessages, userMsg];
-    setChatMessages(newMessages);
+    const input = chatInput.trim();
+    if (!input) return;
     setChatInput('');
     setLoading('convo'); setError(null);
+
+    const userMsg = { role: 'user', content: input };
+    setChatMessages((prev) => {
+      return [...prev, userMsg, { role: 'assistant', content: '' }];
+    });
+
     try {
-      const text = await continueConversation(newMessages, targetLang, difficulty, effectiveTopic, userGender, targetGender, personality);
-      const parsed = parseConvoResponse(text);
-      const assistantMsg = { role: 'assistant', content: parsed.reply || text };
-      const correctedUserMsg = { ...userMsg, corrected: parsed.corrected };
-      setChatMessages([...chatMessages, correctedUserMsg, assistantMsg]);
+      const stream = continueConversationStream([...chatMessages, userMsg], targetLang, difficulty, effectiveTopic, userGender, targetGender, personality);
+      let rawText = '';
+      const assistantIdx = chatMessages.length + 1;
+
+      for await (const chunk of stream) {
+        rawText += chunk;
+        const parsed = parseConvoResponse(rawText);
+        setChatMessages((prev) => {
+          const updated = [...prev];
+          if (updated.length > assistantIdx) {
+            updated[assistantIdx] = { role: 'assistant', content: parsed.reply || rawText };
+          }
+          return updated;
+        });
+      }
+
+      const parsed = parseConvoResponse(rawText);
+      setChatMessages((prev) => {
+        const updated = [...prev];
+        if (updated.length > assistantIdx - 1 && parsed.corrected) {
+          updated[assistantIdx - 1] = { ...updated[assistantIdx - 1], corrected: parsed.corrected };
+        }
+        if (updated.length > assistantIdx) {
+          updated[assistantIdx] = { role: 'assistant', content: parsed.reply || rawText };
+        }
+        return updated;
+      });
     } catch (e) { setError(e.message); }
     finally { setLoading(null); }
   }, [chatInput, chatMessages, targetLang, difficulty, effectiveTopic, userGender, targetGender, personality]);
@@ -526,7 +595,7 @@ function App() {
                 )}
                 {chatMessages.map((msg, i) => (
                   <div key={i} className={`convo-msg ${msg.role}`}>
-                    <div className="convo-bubble">{msg.content}</div>
+                    <div className="convo-bubble">{renderSimpleMarkdown(msg.content)}</div>
                     {msg.role === 'user' && msg.corrected && (
                       <div className="convo-corrected">{msg.corrected}</div>
                     )}
@@ -552,7 +621,7 @@ function App() {
                   <textarea
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); } }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && chatInput.trim() && loading !== 'convo') { e.preventDefault(); handleSendChat(); } }}
                     placeholder={`Type in ${tgtLabel}...`}
                     rows={2}
                   />
