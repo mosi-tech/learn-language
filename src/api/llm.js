@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_LLM_API_URL;
+const OLLAMA_URL = import.meta.env.VITE_OLLAMA_API_URL || '';
 
 let currentModel = import.meta.env.VITE_LLM_MODEL || 'gemini-3-flash-preview:cloud';
 
@@ -70,18 +70,21 @@ export function getVoiceLang(langKey) {
 
 async function callLLM(systemPrompt, userPrompt, extraMessages) {
   const messages = [
+    { role: 'system', content: systemPrompt },
     ...(extraMessages || []),
     { role: 'user', content: userPrompt },
   ];
 
-  const res = await fetch(API_URL, {
+  const apiUrl = OLLAMA_URL ? `${OLLAMA_URL}/api/chat` : '/api/chat';
+  const headers = { 'Content-Type': 'application/json' };
+
+  const res = await fetch(apiUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       model: currentModel,
-      max_tokens: 4096,
-      system: systemPrompt,
       messages,
+      stream: false,
     }),
   });
 
@@ -91,11 +94,13 @@ async function callLLM(systemPrompt, userPrompt, extraMessages) {
   }
 
   const data = await res.json();
-  const textBlock = data.content.find((b) => b.type === 'text');
-  if (!textBlock) {
-    throw new Error('No text response from model');
+  if (data.message?.content) {
+    return data.message.content;
   }
-  return textBlock.text;
+  if (data.content) {
+    return data.content;
+  }
+  throw new Error('No text response from model');
 }
 
 export async function generatePassage(difficulty, topic, lineCount, sourceLang, targetLang) {

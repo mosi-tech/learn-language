@@ -34,6 +34,9 @@ body {
 }
 
 .app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 28px;
 }
 
@@ -55,6 +58,7 @@ h1 {
   display: flex;
   gap: 24px;
   align-items: flex-start;
+  justify-content: center;
 }
 
 .main-area {
@@ -70,10 +74,35 @@ h1 {
 @media (max-width: 768px) {
   .app-body {
     flex-direction: column;
+    align-items: stretch;
   }
   .sidebar {
-    width: 100%;
-    order: -1;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 300px;
+    max-width: 85vw;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    z-index: 100;
+    padding: 0;
+    overflow-y: auto;
+    background: var(--bg);
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  .settings {
+    position: static;
+    min-height: 100%;
+    border-radius: 0;
+  }
+  .settings-header {
+    display: flex;
+  }
+  .convo-messages {
+    max-height: 350px;
   }
 }
 
@@ -165,6 +194,65 @@ h1 {
   padding: 20px;
   position: sticky;
   top: 24px;
+}
+
+.settings-header {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.settings-header span {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-h);
+}
+
+.settings-close {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-close:hover {
+  opacity: 1;
+}
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+}
+
+.settings-toggle {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+@media (min-width: 769px) {
+  .settings-toggle {
+    display: none;
+  }
+}
+
+.settings-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .setting-group {
@@ -309,6 +397,17 @@ input[type="range"] {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 24px;
+}
+
+.passage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.passage-header h2 {
+  margin-bottom: 0;
 }
 
 .passage-box h2 {
@@ -835,6 +934,28 @@ textarea::placeholder {
 .translate-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.convo-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speak-btn {
+  color: var(--text);
+  opacity: 0.4;
+}
+
+.speak-btn:hover:not(:disabled) {
+  opacity: 0.8;
+  color: var(--accent);
+}
+
+.speak-btn.speaking {
+  opacity: 1;
+  color: var(--accent);
+  animation: pulse 1.5s infinite;
 }
 
 .convo-translation {

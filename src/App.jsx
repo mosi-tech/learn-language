@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { generatePassage, evaluateTranslation, getCorrectTranslation, setModel as setLLMModel, clearHistory, startConversation, continueConversation, translateToSource, suggestResponse, getVoiceLang } from './api/llm';
+import { generatePassage, evaluateTranslation, getCorrectTranslation, setModel as setLLMModel, clearHistory, startConversation, continueConversation, translateToSource, suggestResponse } from './api/llm';
+import { speakWithLang, getVoiceLang, getTTSSettings, saveTTSSettings } from './api/tts';
 import './App.css';
 
 const MODELS = [
@@ -17,6 +18,23 @@ const MODES = [
   { key: 'translate', label: 'Translate' },
   { key: 'converse', label: 'Converse' },
 ];
+
+function usePersistedState(key, defaultValue) {
+  const [value, setValue] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved !== null ? JSON.parse(saved) : defaultValue;
+    } catch { return defaultValue; }
+  });
+  const persist = useCallback((v) => {
+    setValue((prev) => {
+      const next = typeof v === 'function' ? v(prev) : v;
+      localStorage.setItem(key, JSON.stringify(next));
+      return next;
+    });
+  }, [key]);
+  return [value, persist];
+}
 
 function useVoiceInput(voiceLang, onResult) {
   const [listening, setListening] = useState(false);
@@ -115,13 +133,15 @@ function useVoiceInput(voiceLang, onResult) {
 }
 
 function App() {
-  const [mode, setMode] = useState('converse');
-  const [difficulty, setDifficulty] = useState('easy');
-  const [topic, setTopic] = useState('daily');
-  const [lineCount, setLineCount] = useState(1);
-  const [sourceLang, setSourceLang] = useState('en');
-  const [targetLang, setTargetLang] = useState('es');
-  const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
+  const [mode, setMode] = usePersistedState('ll-mode', 'converse');
+  const [difficulty, setDifficulty] = usePersistedState('ll-difficulty', 'easy');
+  const [topic, setTopic] = usePersistedState('ll-topic', 'daily');
+  const [lineCount, setLineCount] = usePersistedState('ll-lines', 1);
+  const [sourceLang, setSourceLang] = usePersistedState('ll-srcLang', 'en');
+  const [targetLang, setTargetLang] = usePersistedState('ll-tgtLang', 'es');
+  const [selectedModel, setSelectedModel] = usePersistedState('ll-model', MODELS[0].id);
+  const [ttsSettings, setTtsSettings] = useState(getTTSSettings);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [passage, setPassage] = useState(null);
   const [passageText, setPassageText] = useState('');
   const [userInput, setUserInput] = useState('');
@@ -140,6 +160,8 @@ function App() {
   const [translations, setTranslations] = useState({});
   const [loadingTranslation, setLoadingTranslation] = useState(null);
   const [suggesting, setSuggesting] = useState(false);
+  const [speakingIdx, setSpeakingIdx] = useState(null);
+  const [passageSpeaking, setPassageSpeaking] = useState(false);
 
   const chatEndRef = useRef(null);
 
@@ -292,14 +314,36 @@ function App() {
     finally { setSuggesting(false); }
   }, [chatMessages, targetLang, difficulty, suggesting]);
 
+  const handleSpeak = useCallback(async (text, idx) => {
+    if (speakingIdx === idx) { window.speechSynthesis.cancel(); setSpeakingIdx(null); return; }
+    window.speechSynthesis.cancel();
+    setSpeakingIdx(idx);
+    await speakWithLang(text, targetLang, ttsSettings);
+    setSpeakingIdx(null);
+  }, [speakingIdx, targetLang]);
+
+  const handleSpeakPassage = useCallback(async () => {
+    if (!passage) return;
+    if (passageSpeaking) { window.speechSynthesis.cancel(); setPassageSpeaking(false); return; }
+    window.speechSynthesis.cancel();
+    setPassageSpeaking(true);
+    await speakWithLang(passage.join('. '), sourceLang, ttsSettings);
+    setPassageSpeaking(false);
+  }, [passageSpeaking, passage, sourceLang]);
+
   const srcLabel = LANGUAGES.find((l) => l.key === sourceLang).label;
   const tgtLabel = LANGUAGES.find((l) => l.key === targetLang).label;
 
   return (
     <div className="app">
       <div className="app-header">
-        <h1>Learn Language</h1>
-        <p className="subtitle">AI-powered conversational translation practice</p>
+        <button className="settings-toggle" onClick={() => setSidebarOpen(true)} title="Settings">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div>
+          <h1>Learn Language</h1>
+          <p className="subtitle">AI-powered conversational translation practice</p>
+        </div>
       </div>
 
       <div className="app-body">
@@ -327,7 +371,14 @@ function App() {
           {started && mode === 'translate' && (
             <div className="practice-area">
               <div className="passage-box">
-                <h2>{srcLabel} Passage</h2>
+                <div className="passage-header">
+                  <h2>{srcLabel} Passage</h2>
+                  {passage && (
+                    <button className={`icon-btn speak-btn ${passageSpeaking ? 'speaking' : ''}`} onClick={handleSpeakPassage} title={passageSpeaking ? 'Stop' : 'Listen'}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                    </button>
+                  )}
+                </div>
                 {passage ? passage.map((line, i) => (
                   <p key={i} className="passage-line">{line}</p>
                 )) : (
@@ -436,9 +487,14 @@ function App() {
                       <div className="convo-corrected">{msg.corrected}</div>
                     )}
                     {msg.role === 'assistant' && (
-                      <button className="translate-btn" onClick={() => handleTranslate(msg.content, i)} disabled={loadingTranslation === i}>
-                        {translations[i] ? `Hide ${srcLabel}` : loadingTranslation === i ? '...' : `Show ${srcLabel}`}
-                      </button>
+                      <div className="convo-actions">
+                        <button className={`icon-btn speak-btn ${speakingIdx === i ? 'speaking' : ''}`} onClick={() => handleSpeak(msg.content, i)} title={speakingIdx === i ? 'Stop' : 'Listen'}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                        </button>
+                        <button className="translate-btn" onClick={() => handleTranslate(msg.content, i)} disabled={loadingTranslation === i}>
+                          {translations[i] ? `Hide ${srcLabel}` : loadingTranslation === i ? '...' : `Show ${srcLabel}`}
+                        </button>
+                      </div>
                     )}
                     {translations[i] && (
                       <div className="convo-translation">{translations[i]}</div>
@@ -470,8 +526,14 @@ function App() {
           )}
         </div>
 
-        <div className="sidebar">
+        <div className={`sidebar${sidebarOpen ? ' open' : ''}`}>
           <div className="settings">
+            <div className="settings-header">
+              <span>Settings</span>
+              <button className="settings-close" onClick={() => setSidebarOpen(false)} title="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
             <div className="setting-group">
               <label>Mode</label>
               <div className="btn-group">
@@ -526,12 +588,17 @@ function App() {
                 <input type="range" min={1} max={7} value={lineCount} onChange={(e) => setLineCount(Number(e.target.value))} />
               </div>
             )}
+            <div className="setting-group">
+              <label>Voice Speed: {ttsSettings.speed.toFixed(1)}x</label>
+              <input type="range" min={0.3} max={2.0} step={0.1} value={ttsSettings.speed} onChange={(e) => { const s = { ...ttsSettings, speed: parseFloat(e.target.value) }; setTtsSettings(s); saveTTSSettings(s); }} />
+            </div>
             {historyCount > 0 && (
               <button className="clear-btn" onClick={handleClearHistory}>Clear History ({historyCount})</button>
             )}
           </div>
         </div>
       </div>
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
     </div>
   );
 }
