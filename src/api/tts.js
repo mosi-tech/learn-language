@@ -65,7 +65,7 @@ function browserSpeak(text, langKey, speed) {
   return new Promise((resolve) => {
     if (!window.speechSynthesis) { resolve(); return; }
     window.speechSynthesis.cancel();
-    const langMap = { en: 'en-US', es: 'es-ES', hi: 'hi-IN' };
+    const langMap = { en: 'en-US', es: 'es-ES', hi: 'hi-IN', hin: 'hi-IN' };
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang = langMap[langKey] || 'en-US';
     utt.rate = speed;

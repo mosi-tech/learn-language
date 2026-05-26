@@ -62,6 +62,11 @@ const LANG_INFO = {
     cultureHint: 'Use everyday Hinglish — the way Hindi speakers text and chat. E.g. "kya kar raha hai?", "chalo", "haan bilkul", etc.',
     voiceLang: 'hi-IN',
   },
+  hin: {
+    name: 'Hindi (Devanagari)',
+    cultureHint: 'Use everyday Hindi written in Devanagari script — natural conversational Hindi as spoken in India. E.g. "क्या कर रहे हो?", "चलो", "हाँ बिलकुल" etc. Not overly Sanskritized — real spoken Hindi.',
+    voiceLang: 'hi-IN',
+  },
 };
 
 export function getVoiceLang(langKey) {

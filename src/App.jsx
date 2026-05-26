@@ -12,6 +12,7 @@ const TOPICS = ['greetings', 'food', 'daily', 'travel', 'work'];
 const LANGUAGES = [
   { key: 'es', label: 'Spanish' },
   { key: 'hi', label: 'Hindi (Hinglish)' },
+  { key: 'hin', label: 'Hindi (Devanagari)' },
   { key: 'en', label: 'English' },
 ];
 const MODES = [
