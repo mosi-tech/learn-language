@@ -137,8 +137,8 @@ function App() {
   const [difficulty, setDifficulty] = usePersistedState('ll-difficulty', 'easy');
   const [topic, setTopic] = usePersistedState('ll-topic', 'daily');
   const [lineCount, setLineCount] = usePersistedState('ll-lines', 1);
-  const [sourceLang, setSourceLang] = usePersistedState('ll-srcLang', 'en');
-  const [targetLang, setTargetLang] = usePersistedState('ll-tgtLang', 'es');
+  const [sourceLang, setSourceLang] = usePersistedState('ll-srcLang', 'es');
+  const [targetLang, setTargetLang] = usePersistedState('ll-tgtLang', 'en');
   const [selectedModel, setSelectedModel] = usePersistedState('ll-model', MODELS[0].id);
   const [ttsSettings, setTtsSettings] = useState(getTTSSettings);
   const [sidebarOpen, setSidebarOpen] = useState(false);
