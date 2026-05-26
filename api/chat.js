@@ -16,9 +16,16 @@ export default async function handler(req, res) {
       body: JSON.stringify(req.body),
     });
 
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Ollama error:', response.status, errText);
+      return res.status(response.status).send(errText);
+    }
+
     const data = await response.json();
-    res.status(response.status).json(data);
+    res.status(200).json(data);
   } catch (err) {
+    console.error('Chat proxy error:', err);
     res.status(502).json({ error: err.message });
   }
 }

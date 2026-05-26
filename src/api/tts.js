@@ -36,7 +36,7 @@ export async function speakWithLang(text, langKey, settingsOverride) {
       body: JSON.stringify({
         voiceId: settings.voiceId,
         text,
-        model_id: 'eleven_multilingual_v2',
+        model_id: 'eleven_flash_v2_5',
         voice_settings: {
           stability: settings.stability,
           similarity_boost: settings.similarity_boost,
@@ -53,8 +53,9 @@ export async function speakWithLang(text, langKey, settingsOverride) {
       await audio.play();
       return;
     }
-  } catch {
-    // ElevenLabs failed, fall through to browser TTS
+    console.warn('TTS failed:', res.status, await res.text());
+  } catch (e) {
+    console.warn('TTS error:', e);
   }
 
   return browserSpeak(text, langKey, settings.speed);
